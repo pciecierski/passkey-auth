@@ -29,14 +29,21 @@ Opcjonalnie: `npm run db:up` + PostgreSQL w Dockerze, jeśli wolisz Postgres lok
 
 ## Deploy na Railway
 
-1. Utwórz projekt na [Railway](https://railway.app) i połącz repozytorium.
-2. Dodaj **PostgreSQL** (New → Database → PostgreSQL).
-3. W serwisie aplikacji ustaw zmienne:
-   - `DATABASE_URL` — `${{Postgres.DATABASE_URL}}` (referencja do bazy)
-   - `SESSION_SECRET` — losowy sekret (np. `openssl rand -hex 32`)
-   - `RP_ID` — domena Railway, np. `twoja-app.up.railway.app`
-   - `ORIGIN` — `https://twoja-app.up.railway.app`
-4. Deploy — przy starcie `npm run start` uruchomi `prisma migrate deploy` i utworzy tabele.
+1. Utwórz projekt na [Railway](https://railway.app) i połącz repozytorium `passkey-auth`.
+2. **Dodaj PostgreSQL:** w projekcie kliknij **New → Database → PostgreSQL**.
+3. Otwórz serwis aplikacji (nie bazę) → **Variables** i dodaj:
+
+| Zmienna | Wartość |
+|---------|---------|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — w zakładce **Reference** wybierz serwis Postgres |
+| `SESSION_SECRET` | losowy sekret (np. `openssl rand -hex 32`) |
+| `RP_ID` | domena Railway, np. `passkey-auth-production.up.railway.app` |
+| `ORIGIN` | `https://passkey-auth-production.up.railway.app` |
+| `NEXT_PUBLIC_APP_URL` | ten sam URL co `ORIGIN` (dla kodów QR) |
+
+4. **Redeploy** serwisu aplikacji po dodaniu zmiennych.
+
+> Bez `DATABASE_URL` deploy się wyłoży — baza Postgres musi być dodana i podpięta referencją do serwisu www.
 
 Dane (emaile, hasła, Passkey) są w PostgreSQL i **nie znikają po kolejnych deployach**.
 

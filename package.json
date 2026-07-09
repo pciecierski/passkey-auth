@@ -6,7 +6,7 @@
     "prepare:prisma": "node scripts/prepare-prisma.mjs",
     "dev": "npm run prepare:prisma && prisma generate && prisma db push && next dev",
     "build": "npm run prepare:prisma && prisma generate && next build",
-    "start": "npm run prepare:prisma && prisma migrate deploy && next start",
+    "start": "npm run prepare:prisma && node scripts/ensure-database-url.mjs && prisma migrate deploy && next start",
     "lint": "next lint",
     "db:migrate": "npm run prepare:prisma && prisma migrate deploy",
     "db:migrate:dev": "npm run prepare:prisma && prisma migrate dev",
@@ -19,6 +19,7 @@
     "@simplewebauthn/browser": "^13.1.0",
     "@simplewebauthn/server": "^13.1.1",
     "next": "^15.2.4",
+    "prisma": "^6.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-qr-code": "^2.2.0"
@@ -29,7 +30,6 @@
     "@types/react-dom": "^19.0.4",
     "eslint": "^9.22.0",
     "eslint-config-next": "^15.2.4",
-    "prisma": "^6.5.0",
     "typescript": "^5.8.2"
   }
 }
