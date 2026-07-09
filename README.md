@@ -37,8 +37,8 @@ Opcjonalnie: `npm run db:up` + PostgreSQL w Dockerze, jeśli wolisz Postgres lok
 |---------|---------|
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — w zakładce **Reference** wybierz serwis Postgres |
 | `SESSION_SECRET` | losowy sekret (np. `openssl rand -hex 32`) |
-| `RP_ID` | domena Railway, np. `passkey-auth-production.up.railway.app` |
-| `ORIGIN` | `https://passkey-auth-production.up.railway.app` |
+| `RP_ID` | **tylko domena**, np. `passkey-auth.dcsandbox.dev` (bez `https://`) |
+| `ORIGIN` | pełny URL, np. `https://passkey-auth.dcsandbox.dev` |
 | `NEXT_PUBLIC_APP_URL` | ten sam URL co `ORIGIN` (dla kodów QR) |
 
 4. **Redeploy** serwisu aplikacji po dodaniu zmiennych.
