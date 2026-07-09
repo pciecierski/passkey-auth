@@ -1,0 +1,35 @@
+{
+  "name": "passkey-auth",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prepare:prisma": "node scripts/prepare-prisma.mjs",
+    "dev": "npm run prepare:prisma && prisma generate && prisma db push && next dev",
+    "build": "npm run prepare:prisma && prisma generate && next build",
+    "start": "npm run prepare:prisma && prisma migrate deploy && next start",
+    "lint": "next lint",
+    "db:migrate": "npm run prepare:prisma && prisma migrate deploy",
+    "db:migrate:dev": "npm run prepare:prisma && prisma migrate dev",
+    "db:push": "npm run prepare:prisma && prisma db push",
+    "db:studio": "npm run prepare:prisma && prisma studio",
+    "db:up": "docker compose up -d"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "@simplewebauthn/browser": "^13.1.0",
+    "@simplewebauthn/server": "^13.1.1",
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-qr-code": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "^15.2.4",
+    "prisma": "^6.5.0",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: passkey
+      POSTGRES_PASSWORD: passkey
+      POSTGRES_DB: passkey_auth
+    ports:
+      - "5432:5432"
+    volumes:
+      - passkey_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  passkey_postgres_data:
