@@ -176,9 +176,11 @@ export function PasskeyAuth() {
 
           if (data.status === "complete" && data.user) {
             setUser(data.user);
-            setMessage("Zalogowano na desktopie po autoryzacji mobilnej.");
+            setLoginStep("email");
+            setAccountStatus(null);
+            setHandoffId(null);
             setWaitingForMobile(false);
-            resetLoginFlow();
+            setMessage("Zalogowano na desktopie po autoryzacji mobilnej.");
           }
         } catch {
           // Keep polling until success or manual cancel.
