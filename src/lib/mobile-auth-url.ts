@@ -15,6 +15,7 @@ export function buildMobileAuthUrl(params: {
   mode: "login" | "register";
   email: string;
   step?: "action";
+  handoffId?: string;
 }): string {
   const url = new URL("/", getAppOrigin());
   url.searchParams.set("mobile", "1");
@@ -23,6 +24,10 @@ export function buildMobileAuthUrl(params: {
 
   if (params.step) {
     url.searchParams.set("step", params.step);
+  }
+
+  if (params.handoffId) {
+    url.searchParams.set("handoff", params.handoffId);
   }
 
   return url.toString();

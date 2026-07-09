@@ -55,3 +55,14 @@ model WebAuthnChallenge {
 
   @@index([expiresAt])
 }
+
+model AuthHandoff {
+  id        String    @id @default(cuid())
+  email     String?
+  userId    String?
+  expiresAt DateTime
+  claimedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([expiresAt])
+}

@@ -57,6 +57,8 @@ export function PasskeyAuth() {
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
   const [platformAvailable, setPlatformAvailable] = useState<boolean | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [handoffId, setHandoffId] = useState<string | null>(null);
+  const [waitingForMobile, setWaitingForMobile] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -86,6 +88,11 @@ export function PasskeyAuth() {
     const tab = params.get("tab");
     const emailParam = params.get("email")?.trim().toLowerCase();
     const step = params.get("step");
+    const handoffParam = params.get("handoff");
+
+    if (handoffParam) {
+      setHandoffId(handoffParam);
+    }
 
     if (emailParam) {
       setEmail(emailParam);
@@ -104,10 +111,92 @@ export function PasskeyAuth() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isDesktop || loginStep !== "action" || !email.trim()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/handoff/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+
+        if (!response.ok || cancelled) {
+          return;
+        }
+
+        const data = (await response.json()) as { handoffId: string };
+        setHandoffId(data.handoffId);
+        setWaitingForMobile(true);
+      } catch {
+        // QR still works without handoff sync.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktop, loginStep, email]);
+
+  useEffect(() => {
+    if (!isDesktop || !handoffId || !waitingForMobile || user) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/auth/handoff/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ handoffId }),
+          });
+
+          if (response.status === 202) {
+            return;
+          }
+
+          if (!response.ok) {
+            if (response.status === 410) {
+              setWaitingForMobile(false);
+              setMessage("Sesja QR wygasła. Odśwież kod i spróbuj ponownie.");
+            }
+            return;
+          }
+
+          const data = (await response.json()) as {
+            status: string;
+            user: User;
+          };
+
+          if (data.status === "complete" && data.user) {
+            setUser(data.user);
+            setMessage("Zalogowano na desktopie po autoryzacji mobilnej.");
+            setWaitingForMobile(false);
+            resetLoginFlow();
+          }
+        } catch {
+          // Keep polling until success or manual cancel.
+        }
+      })();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isDesktop, handoffId, waitingForMobile, user]);
+
   function resetLoginFlow() {
     setLoginStep("email");
     setAccountStatus(null);
     setMessage(null);
+    setHandoffId(null);
+    setWaitingForMobile(false);
   }
 
   function switchMode(nextMode: Mode) {
@@ -231,7 +320,10 @@ export function PasskeyAuth() {
       const verifyResponse = await fetch("/api/auth/register/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(attestation),
+        body: JSON.stringify({
+          ...attestation,
+          handoffId: handoffId ?? undefined,
+        }),
       });
 
       if (!verifyResponse.ok) {
@@ -272,7 +364,10 @@ export function PasskeyAuth() {
       const verifyResponse = await fetch("/api/auth/login/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(assertion),
+        body: JSON.stringify({
+          ...assertion,
+          handoffId: handoffId ?? undefined,
+        }),
       });
 
       if (!verifyResponse.ok) {
@@ -315,11 +410,12 @@ export function PasskeyAuth() {
     ? password.length > 0
     : password.length >= 8 && password === confirmPassword && confirmPassword.length > 0;
   const mobileAuthUrl =
-    loginStep === "action" && emailIsValid
+    loginStep === "action" && emailIsValid && (!isDesktop || handoffId)
       ? buildMobileAuthUrl({
           mode: accountStatus?.hasPasskey ? "login" : "register",
           email,
           step: accountStatus?.hasPasskey ? "action" : undefined,
+          handoffId: handoffId ?? undefined,
         })
       : null;
 
@@ -448,6 +544,10 @@ export function PasskeyAuth() {
                   : " To konto nie ma jeszcze Passkey — utwórz go, aby się zalogować."}
               </p>
 
+              {isDesktop && loginStep === "action" && !handoffId && (
+                <p className="hint">Przygotowywanie kodu QR…</p>
+              )}
+
               {isDesktop && mobileAuthUrl && (
                 <MobileAuthQr
                   url={mobileAuthUrl}
@@ -462,6 +562,10 @@ export function PasskeyAuth() {
                       : "Zeskanuj kod QR telefonem, aby przejść do rejestracji Passkey i dokończyć autoryzację."
                   }
                 />
+              )}
+
+              {waitingForMobile && (
+                <p className="hint">Oczekiwanie na logowanie z urządzenia mobilnego…</p>
               )}
 
               {message && <p className="error">{message}</p>}
