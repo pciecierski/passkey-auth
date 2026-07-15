@@ -500,14 +500,13 @@ export function PasskeyAuth() {
       const sessionResponse = await fetch("/api/auth/session");
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
-      setMessage(
-        fromQrHandoff
-          ? "Passkey potwierdzony. Możesz wrócić do iPada — logowanie dokończy się automatycznie."
-          : useHybrid
-            ? "Zalogowano na desktopie po Passkey z telefonu."
-            : "Zalogowano przez Passkey.",
-      );
+      const successMessage = fromQrHandoff
+        ? "Passkey potwierdzony. Możesz wrócić do iPada — logowanie dokończy się automatycznie."
+        : useHybrid
+          ? "Zalogowano na desktopie po Passkey z telefonu."
+          : "Zalogowano przez Passkey.";
       resetLoginFlow();
+      setMessage(successMessage);
     } catch (error) {
       if (isWebAuthnCancelError(error)) {
         setMessage(
