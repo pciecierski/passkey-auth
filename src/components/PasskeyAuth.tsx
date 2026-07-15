@@ -14,7 +14,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
 import { AppLogo } from "@/components/AppLogo";
-import { isDesktopBrowser } from "@/lib/device";
+import { isDesktopBrowser, isIPadBrowser } from "@/lib/device";
 import {
   startHybridAuthentication,
   startHybridRegistration,
@@ -72,6 +72,8 @@ export function PasskeyAuth() {
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
   const [platformAvailable, setPlatformAvailable] = useState<boolean | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isIPad, setIsIPad] = useState(false);
+  const [waitingForOtherDevice, setWaitingForOtherDevice] = useState(false);
   const desktopLoginStartedRef = useRef(false);
 
   useEffect(() => {
@@ -79,6 +81,7 @@ export function PasskeyAuth() {
       const supported = browserSupportsWebAuthn();
       setWebAuthnSupported(supported);
       setIsDesktop(isDesktopBrowser());
+      setIsIPad(isIPadBrowser());
       if (supported) {
         setPlatformAvailable(await platformAuthenticatorIsAvailable());
       }
@@ -149,6 +152,7 @@ export function PasskeyAuth() {
     setLoginStep("email");
     setAccountStatus(null);
     setMessage(null);
+    setWaitingForOtherDevice(false);
     desktopLoginStartedRef.current = false;
   }
 
@@ -317,26 +321,29 @@ export function PasskeyAuth() {
     }
   }
 
-  async function handleLogin() {
+  async function handleLogin(options?: { useHybrid?: boolean }) {
+    const useHybrid = options?.useHybrid === true || isDesktop;
     setLoading(true);
     setMessage(null);
+    setWaitingForOtherDevice(useHybrid);
 
     try {
       const optionsResponse = await fetch("/api/auth/login/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, preferHybrid: isDesktop }),
+        body: JSON.stringify({ email, preferHybrid: useHybrid }),
       });
 
       if (!optionsResponse.ok) {
         throw new Error(await readError(optionsResponse));
       }
 
-      const options = (await optionsResponse.json()) as PublicKeyCredentialRequestOptionsJSON;
+      const webauthnOptions =
+        (await optionsResponse.json()) as PublicKeyCredentialRequestOptionsJSON;
       const assertion = (
-        isDesktop
-          ? await startHybridAuthentication(options)
-          : await startAuthentication({ optionsJSON: options })
+        useHybrid
+          ? await startHybridAuthentication(webauthnOptions)
+          : await startAuthentication({ optionsJSON: webauthnOptions })
       ) as AuthenticationResponseJSON;
 
       const verifyResponse = await fetch("/api/auth/login/verify", {
@@ -354,16 +361,18 @@ export function PasskeyAuth() {
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
       setMessage(
-        isDesktop
-          ? "Zalogowano na desktopie po Passkey z telefonu."
+        useHybrid
+          ? isDesktop
+            ? "Zalogowano na desktopie po Passkey z telefonu."
+            : "Zalogowano po Passkey z innego urządzenia mobilnego."
           : "Zalogowano przez Passkey.",
       );
       resetLoginFlow();
     } catch (error) {
       if (isWebAuthnCancelError(error)) {
         setMessage(
-          isDesktop
-            ? "Anulowano. Zeskanuj kod QR z okna przeglądarki telefonem albo spróbuj ponownie."
+          useHybrid
+            ? "Anulowano. Zeskanuj kod QR z okna przeglądarki innym telefonem albo spróbuj ponownie."
             : "Anulowano logowanie Passkey.",
         );
       } else {
@@ -371,6 +380,7 @@ export function PasskeyAuth() {
       }
     } finally {
       setLoading(false);
+      setWaitingForOtherDevice(false);
     }
   }
 
@@ -521,14 +531,16 @@ export function PasskeyAuth() {
                   : " To konto nie ma jeszcze Passkey."}
               </p>
 
-              {isDesktop && accountStatus.hasPasskey && (
+              {(isDesktop || waitingForOtherDevice) && accountStatus.hasPasskey && (
                 <div className="desktop-qr-guide">
                   <p className="hint">
-                    Przeglądarka pokazuje natywny kod QR. Zeskanuj go aparatem telefonu — system
+                    Przeglądarka pokazuje natywny kod QR. Zeskanuj go aparatem iPhone’a — system
                     zaproponuje Passkey do tej witryny, bez otwierania strony w przeglądarce na
                     telefonie. Urządzenia powinny być blisko siebie (Bluetooth).
                   </p>
-                  {loading && <p className="hint">Oczekiwanie na Passkey z telefonu…</p>}
+                  {loading && (
+                    <p className="hint">Oczekiwanie na Passkey z innego urządzenia mobilnego…</p>
+                  )}
                 </div>
               )}
 
@@ -536,6 +548,13 @@ export function PasskeyAuth() {
                 <p className="warning">
                   Utwórz Passkey w zakładce Rejestracja — przeglądarka pokaże kod QR, a klucz
                   powstanie na telefonie.
+                </p>
+              )}
+
+              {isIPad && accountStatus.hasPasskey && !waitingForOtherDevice && (
+                <p className="hint">
+                  Możesz użyć Passkey na tym iPadzie albo wygenerować kod QR i zalogować się
+                  Passkeyem z iPhone’a.
                 </p>
               )}
 
@@ -548,7 +567,7 @@ export function PasskeyAuth() {
                     type="button"
                     onClick={() => {
                       desktopLoginStartedRef.current = true;
-                      void handleLogin();
+                      void handleLogin({ useHybrid: true });
                     }}
                     disabled={loading}
                   >
@@ -565,14 +584,30 @@ export function PasskeyAuth() {
                   </button>
                 )
               ) : accountStatus.hasPasskey ? (
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => void handleLogin()}
-                  disabled={loading}
-                >
-                  {loading ? "Oczekiwanie na urządzenie..." : "Zaloguj przez Passkey"}
-                </button>
+                <>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => void handleLogin()}
+                    disabled={loading}
+                  >
+                    {loading && !waitingForOtherDevice
+                      ? "Oczekiwanie na urządzenie..."
+                      : "Zaloguj przez Passkey"}
+                  </button>
+                  {isIPad && (
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => void handleLogin({ useHybrid: true })}
+                      disabled={loading}
+                    >
+                      {loading && waitingForOtherDevice
+                        ? "Oczekiwanie na iPhone’a…"
+                        : "Zaloguj się na innym urządzeniu mobilnym"}
+                    </button>
+                  )}
+                </>
               ) : (
                 <button
                   className="button"
