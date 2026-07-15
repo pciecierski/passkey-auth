@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   startAuthentication,
   startRegistration,
@@ -9,12 +9,16 @@ import {
 } from "@simplewebauthn/browser";
 import type {
   AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
 import { AppLogo } from "@/components/AppLogo";
-import { MobileAuthQr } from "@/components/MobileAuthQr";
 import { isDesktopBrowser } from "@/lib/device";
-import { buildMobileAuthUrl } from "@/lib/mobile-auth-url";
+import {
+  startHybridAuthentication,
+  startHybridRegistration,
+} from "@/lib/webauthn-client";
 
 type User = {
   id: string;
@@ -42,6 +46,17 @@ async function readError(response: Response): Promise<string> {
   return data?.error ?? "Something went wrong";
 }
 
+function isWebAuthnCancelError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const name = "name" in error ? String((error as { name?: string }).name) : "";
+  return (
+    name === "NotAllowedError" ||
+    /timed out|not allowed|cancel|abort/i.test(error.message)
+  );
+}
+
 export function PasskeyAuth() {
   const [mode, setMode] = useState<Mode>("login");
   const [loginStep, setLoginStep] = useState<LoginStep>("email");
@@ -57,8 +72,7 @@ export function PasskeyAuth() {
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
   const [platformAvailable, setPlatformAvailable] = useState<boolean | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
-  const [handoffId, setHandoffId] = useState<string | null>(null);
-  const [waitingForMobile, setWaitingForMobile] = useState(false);
+  const desktopLoginStartedRef = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -80,6 +94,7 @@ export function PasskeyAuth() {
       return;
     }
 
+    // Legacy deep links (?mobile=1) still work on phones; desktop no longer generates page URLs.
     const params = new URLSearchParams(window.location.search);
     if (params.get("mobile") !== "1") {
       return;
@@ -88,11 +103,6 @@ export function PasskeyAuth() {
     const tab = params.get("tab");
     const emailParam = params.get("email")?.trim().toLowerCase();
     const step = params.get("step");
-    const handoffParam = params.get("handoff");
-
-    if (handoffParam) {
-      setHandoffId(handoffParam);
-    }
 
     if (emailParam) {
       setEmail(emailParam);
@@ -112,93 +122,34 @@ export function PasskeyAuth() {
   }, []);
 
   useEffect(() => {
-    if (!isDesktop || loginStep !== "action" || !email.trim()) {
+    if (
+      !isDesktop ||
+      mode !== "login" ||
+      loginStep !== "action" ||
+      !accountStatus?.hasPasskey ||
+      user ||
+      desktopLoginStartedRef.current
+    ) {
       return;
     }
 
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const response = await fetch("/api/auth/handoff/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
-        });
-
-        if (!response.ok || cancelled) {
-          return;
-        }
-
-        const data = (await response.json()) as { handoffId: string };
-        setHandoffId(data.handoffId);
-        setWaitingForMobile(true);
-      } catch {
-        // QR still works without handoff sync.
-      }
-    })();
+    desktopLoginStartedRef.current = true;
+    const timer = window.setTimeout(() => {
+      void handleLogin();
+    }, 50);
 
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [isDesktop, loginStep, email]);
-
-  useEffect(() => {
-    if (!isDesktop || !handoffId || !waitingForMobile || user) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void (async () => {
-        try {
-          const response = await fetch("/api/auth/handoff/claim", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ handoffId }),
-          });
-
-          if (response.status === 202) {
-            return;
-          }
-
-          if (!response.ok) {
-            if (response.status === 410) {
-              setWaitingForMobile(false);
-              setMessage("Sesja QR wygasła. Odśwież kod i spróbuj ponownie.");
-            }
-            return;
-          }
-
-          const data = (await response.json()) as {
-            status: string;
-            user: User;
-          };
-
-          if (data.status === "complete" && data.user) {
-            setUser(data.user);
-            setLoginStep("email");
-            setAccountStatus(null);
-            setHandoffId(null);
-            setWaitingForMobile(false);
-            setMessage("Zalogowano na desktopie po autoryzacji mobilnej.");
-          }
-        } catch {
-          // Keep polling until success or manual cancel.
-        }
-      })();
-    }, 2000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [isDesktop, handoffId, waitingForMobile, user]);
+    // Auto-start once when desktop reaches the passkey-ready step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktop, mode, loginStep, accountStatus?.hasPasskey, user]);
 
   function resetLoginFlow() {
     setLoginStep("email");
     setAccountStatus(null);
     setMessage(null);
-    setHandoffId(null);
-    setWaitingForMobile(false);
+    desktopLoginStartedRef.current = false;
   }
 
   function switchMode(nextMode: Mode) {
@@ -263,6 +214,7 @@ export function PasskeyAuth() {
       setAccountStatus(status);
       setLoginStep("action");
       setMode("login");
+      desktopLoginStartedRef.current = false;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nie udało się sprawdzić konta");
     } finally {
@@ -307,8 +259,13 @@ export function PasskeyAuth() {
           email,
           name: allowExistingAccount ? accountStatus?.name ?? undefined : name,
           password: allowExistingAccount ? undefined : password,
-          confirmPassword: allowExistingAccount ? undefined : confirmPassword,
+          confirmPassword: allowExistingAccount
+            ? undefined
+            : registerAccountExists
+              ? password
+              : confirmPassword,
           allowExistingAccount,
+          preferHybrid: isDesktop,
         }),
       });
 
@@ -316,16 +273,17 @@ export function PasskeyAuth() {
         throw new Error(await readError(optionsResponse));
       }
 
-      const options = await optionsResponse.json();
-      const attestation = (await startRegistration({ optionsJSON: options })) as RegistrationResponseJSON;
+      const options = (await optionsResponse.json()) as PublicKeyCredentialCreationOptionsJSON;
+      const attestation = (
+        isDesktop
+          ? await startHybridRegistration(options)
+          : await startRegistration({ optionsJSON: options })
+      ) as RegistrationResponseJSON;
 
       const verifyResponse = await fetch("/api/auth/register/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...attestation,
-          handoffId: handoffId ?? undefined,
-        }),
+        body: JSON.stringify(attestation),
       });
 
       if (!verifyResponse.ok) {
@@ -336,10 +294,24 @@ export function PasskeyAuth() {
       const sessionResponse = await fetch("/api/auth/session");
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
-      setMessage(allowExistingAccount ? "Passkey utworzony. Zalogowano." : "Konto i Passkey utworzone.");
+      setMessage(
+        allowExistingAccount
+          ? "Passkey utworzony. Zalogowano."
+          : isDesktop
+            ? "Konto i Passkey utworzone na telefonie. Zalogowano na desktopie."
+            : "Konto i Passkey utworzone.",
+      );
       resetLoginFlow();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Rejestracja nie powiodła się");
+      if (isWebAuthnCancelError(error)) {
+        setMessage(
+          isDesktop
+            ? "Anulowano. Zeskanuj kod QR telefonem albo spróbuj ponownie."
+            : "Anulowano tworzenie Passkey.",
+        );
+      } else {
+        setMessage(error instanceof Error ? error.message : "Rejestracja nie powiodła się");
+      }
     } finally {
       setLoading(false);
     }
@@ -353,23 +325,24 @@ export function PasskeyAuth() {
       const optionsResponse = await fetch("/api/auth/login/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, preferHybrid: isDesktop }),
       });
 
       if (!optionsResponse.ok) {
         throw new Error(await readError(optionsResponse));
       }
 
-      const options = await optionsResponse.json();
-      const assertion = (await startAuthentication({ optionsJSON: options })) as AuthenticationResponseJSON;
+      const options = (await optionsResponse.json()) as PublicKeyCredentialRequestOptionsJSON;
+      const assertion = (
+        isDesktop
+          ? await startHybridAuthentication(options)
+          : await startAuthentication({ optionsJSON: options })
+      ) as AuthenticationResponseJSON;
 
       const verifyResponse = await fetch("/api/auth/login/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...assertion,
-          handoffId: handoffId ?? undefined,
-        }),
+        body: JSON.stringify(assertion),
       });
 
       if (!verifyResponse.ok) {
@@ -380,10 +353,22 @@ export function PasskeyAuth() {
       const sessionResponse = await fetch("/api/auth/session");
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
-      setMessage("Zalogowano przez Passkey.");
+      setMessage(
+        isDesktop
+          ? "Zalogowano na desktopie po Passkey z telefonu."
+          : "Zalogowano przez Passkey.",
+      );
       resetLoginFlow();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Logowanie nie powiodło się");
+      if (isWebAuthnCancelError(error)) {
+        setMessage(
+          isDesktop
+            ? "Anulowano. Zeskanuj kod QR z okna przeglądarki telefonem albo spróbuj ponownie."
+            : "Anulowano logowanie Passkey.",
+        );
+      } else {
+        setMessage(error instanceof Error ? error.message : "Logowanie nie powiodło się");
+      }
     } finally {
       setLoading(false);
     }
@@ -411,15 +396,6 @@ export function PasskeyAuth() {
   const registerPasswordIsValid = registerAccountExists
     ? password.length > 0
     : password.length >= 8 && password === confirmPassword && confirmPassword.length > 0;
-  const mobileAuthUrl =
-    loginStep === "action" && emailIsValid && (!isDesktop || handoffId)
-      ? buildMobileAuthUrl({
-          mode: accountStatus?.hasPasskey ? "login" : "register",
-          email,
-          step: accountStatus?.hasPasskey ? "action" : undefined,
-          handoffId: handoffId ?? undefined,
-        })
-      : null;
 
   if (webAuthnSupported === false) {
     return (
@@ -469,18 +445,15 @@ export function PasskeyAuth() {
   return (
     <div className="card">
       <AppLogo />
-      <p className="badge">Mobilna autoryzacja Passkey</p>
+      <p className="badge">
+        {isDesktop ? "Autoryzacja przez telefon" : "Mobilna autoryzacja Passkey"}
+      </p>
       <h1>{mode === "login" ? "Logowanie" : "Rejestracja"}</h1>
       <p className="muted">
-        Użyj Face ID, Touch ID, odcisku palca lub kodu PIN urządzenia.
-        {platformAvailable === false && " Brak autentykatora platformowego na tym urządzeniu."}
-        {mode === "register" && isDesktop && (
-          <span className="warning">
-            {" "}
-            Rejestrację wykonaj na urządzeniu mobilnym, aby poprawnie utworzyć klucz dostępu (Passkey),
-            który będzie wykorzystywany do późniejszych logowań.
-          </span>
-        )}
+        {isDesktop
+          ? "Na desktopie logowanie odbywa się przez kod QR przeglądarki. Passkey działa wyłącznie na telefonie."
+          : "Użyj Face ID, Touch ID, odcisku palca lub kodu PIN urządzenia."}
+        {!isDesktop && platformAvailable === false && " Brak autentykatora platformowego na tym urządzeniu."}
       </p>
 
       <div className="tabs">
@@ -542,37 +515,56 @@ export function PasskeyAuth() {
               <p className="message">
                 Konto <strong>{email.trim().toLowerCase()}</strong> istnieje.
                 {accountStatus.hasPasskey
-                  ? " Możesz zalogować się przez Passkey."
-                  : " To konto nie ma jeszcze Passkey — utwórz go, aby się zalogować."}
+                  ? isDesktop
+                    ? " Zaloguj się skanując kod QR telefonem."
+                    : " Możesz zalogować się przez Passkey."
+                  : " To konto nie ma jeszcze Passkey."}
               </p>
 
-              {isDesktop && loginStep === "action" && !handoffId && (
-                <p className="hint">Przygotowywanie kodu QR…</p>
+              {isDesktop && accountStatus.hasPasskey && (
+                <div className="desktop-qr-guide">
+                  <p className="hint">
+                    Przeglądarka pokazuje natywny kod QR. Zeskanuj go aparatem telefonu — system
+                    zaproponuje Passkey do tej witryny, bez otwierania strony w przeglądarce na
+                    telefonie. Urządzenia powinny być blisko siebie (Bluetooth).
+                  </p>
+                  {loading && <p className="hint">Oczekiwanie na Passkey z telefonu…</p>}
+                </div>
               )}
 
-              {isDesktop && mobileAuthUrl && (
-                <MobileAuthQr
-                  url={mobileAuthUrl}
-                  title={
-                    accountStatus.hasPasskey
-                      ? "Autoryzacja na urządzeniu mobilnym"
-                      : "Rejestracja Passkey na urządzeniu mobilnym"
-                  }
-                  description={
-                    accountStatus.hasPasskey
-                      ? "Zeskanuj kod QR telefonem, aby przejść do logowania przez Passkey."
-                      : "Zeskanuj kod QR telefonem, aby przejść do rejestracji Passkey i dokończyć autoryzację."
-                  }
-                />
+              {isDesktop && !accountStatus.hasPasskey && (
+                <p className="warning">
+                  Utwórz Passkey w zakładce Rejestracja — przeglądarka pokaże kod QR, a klucz
+                  powstanie na telefonie.
+                </p>
               )}
 
-              {waitingForMobile && (
-                <p className="hint">Oczekiwanie na logowanie z urządzenia mobilnego…</p>
-              )}
+              {message && <p className={message.startsWith("Anulowano") ? "hint" : "error"}>{message}</p>}
 
-              {message && <p className="error">{message}</p>}
-
-              {accountStatus.hasPasskey ? (
+              {isDesktop ? (
+                accountStatus.hasPasskey ? (
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => {
+                      desktopLoginStartedRef.current = true;
+                      void handleLogin();
+                    }}
+                    disabled={loading}
+                  >
+                    {loading ? "Oczekiwanie na telefon…" : "Pokaż kod QR ponownie"}
+                  </button>
+                ) : (
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => switchMode("register")}
+                    disabled={loading}
+                  >
+                    Przejdź do rejestracji Passkey
+                  </button>
+                )
+              ) : accountStatus.hasPasskey ? (
                 <button
                   className="button"
                   type="button"
@@ -675,9 +667,13 @@ export function PasskeyAuth() {
           <p className="hint">
             {registerAccountStatus?.exists && registerAccountStatus.hasPasskey
               ? "To konto już ma Passkey. Przejdź do logowania."
-              : registerAccountExists
-                ? "To konto już istnieje. Podaj aktualne hasło, aby dodać Passkey."
-                : "Utworzysz nowe konto z hasłem i przypiszesz do niego Passkey."}
+              : isDesktop
+                ? registerAccountExists
+                  ? "Podaj aktualne hasło. Potem zeskanuj kod QR telefonem, aby utworzyć Passkey na telefonie."
+                  : "Utworzysz konto z hasłem. Passkey powstanie na telefonie po zeskanowaniu kodu QR z przeglądarki."
+                : registerAccountExists
+                  ? "To konto już istnieje. Podaj aktualne hasło, aby dodać Passkey."
+                  : "Utworzysz nowe konto z hasłem i przypiszesz do niego Passkey."}
           </p>
 
           {message && <p className="error">{message}</p>}
@@ -692,7 +688,13 @@ export function PasskeyAuth() {
               (registerAccountStatus?.exists === true && registerAccountStatus.hasPasskey)
             }
           >
-            {loading ? "Oczekiwanie na urządzenie..." : "Zarejestruj konto z Passkey"}
+            {loading
+              ? isDesktop
+                ? "Zeskanuj kod QR telefonem…"
+                : "Oczekiwanie na urządzenie..."
+              : isDesktop
+                ? "Utwórz Passkey na telefonie"
+                : "Zarejestruj konto z Passkey"}
           </button>
         </form>
       )}

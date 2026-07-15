@@ -23,7 +23,11 @@ function parseTransports(value: string | null): AuthenticatorTransportFuture[] |
 export async function beginRegistration(
   email: string,
   name?: string,
-  settings?: { allowExistingAccount?: boolean; password?: string },
+  settings?: {
+    allowExistingAccount?: boolean;
+    password?: string;
+    preferHybrid?: boolean;
+  },
 ) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) {
@@ -82,8 +86,10 @@ export async function beginRegistration(
     authenticatorSelection: {
       residentKey: "preferred",
       userVerification: "preferred",
-      authenticatorAttachment: "platform",
     },
+    // Desktop: remoteDevice → native FIDO QR for creating the passkey on a phone.
+    // Mobile: localDevice → Face ID / fingerprint on this device.
+    preferredAuthenticatorType: settings?.preferHybrid ? "remoteDevice" : "localDevice",
   });
 
   await storeChallenge(registrationOptions.challenge, {
@@ -150,7 +156,10 @@ export async function finishRegistration(response: RegistrationResponseJSON) {
   return user;
 }
 
-export async function beginAuthentication(email: string) {
+export async function beginAuthentication(
+  email: string,
+  settings?: { preferHybrid?: boolean },
+) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) {
     throw new Error("Email is required");
@@ -171,10 +180,16 @@ export async function beginAuthentication(email: string) {
     throw new Error("No passkey found for this account. Create one first.");
   }
 
-  const allowCredentials = user.passkeys.map((passkey) => ({
-    id: passkey.credentialId,
-    transports: parseTransports(passkey.transports),
-  }));
+  const allowCredentials = user.passkeys.map((passkey) => {
+    const transports = parseTransports(passkey.transports) ?? [];
+    if (settings?.preferHybrid && !transports.includes("hybrid")) {
+      transports.push("hybrid");
+    }
+    return {
+      id: passkey.credentialId,
+      transports: transports.length > 0 ? transports : undefined,
+    };
+  });
 
   const options = await generateAuthenticationOptions({
     rpID,
@@ -186,6 +201,13 @@ export async function beginAuthentication(email: string) {
     challenge: options.challenge,
     email: normalizedEmail,
   });
+
+  if (settings?.preferHybrid) {
+    return {
+      ...options,
+      hints: ["hybrid"] as const,
+    };
+  }
 
   return options;
 }

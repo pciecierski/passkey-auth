@@ -9,6 +9,7 @@ export async function POST(request: Request) {
       password?: string;
       confirmPassword?: string;
       allowExistingAccount?: boolean;
+      preferHybrid?: boolean;
     };
 
     if (!body.allowExistingAccount) {
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     const options = await beginRegistration(body.email ?? "", body.name, {
       allowExistingAccount: body.allowExistingAccount,
       password: body.password,
+      preferHybrid: body.preferHybrid === true,
     });
     return NextResponse.json(options);
   } catch (error) {
