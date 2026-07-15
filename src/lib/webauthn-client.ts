@@ -12,6 +12,9 @@ import {
 /**
  * Prefer cross-device (phone) passkeys so the browser shows a native FIDO QR.
  * Scanning that QR suggests the site passkey in the phone OS UI — it does not open a webpage.
+ *
+ * Important: transports must be hybrid-only. Mixing in "internal" lets Safari/iPadOS
+ * keep offering a local platform passkey instead of a QR code.
  */
 export function withHybridPreference<
   T extends PublicKeyCredentialRequestOptionsJSON | PublicKeyCredentialCreationOptionsJSON,
@@ -21,9 +24,7 @@ export function withHybridPreference<
   if ("allowCredentials" in next && Array.isArray(next.allowCredentials)) {
     next.allowCredentials = next.allowCredentials.map((credential) => ({
       ...credential,
-      transports: Array.from(
-        new Set([...(credential.transports ?? []), "hybrid"]),
-      ) as NonNullable<(typeof credential)["transports"]>,
+      transports: ["hybrid"] as NonNullable<(typeof credential)["transports"]>,
     }));
   }
 
