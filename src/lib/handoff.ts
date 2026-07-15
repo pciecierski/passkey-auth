@@ -4,6 +4,12 @@ import { normalizeEmail } from "@/lib/accounts";
 const HANDOFF_TTL_MS = 10 * 60 * 1000;
 
 export async function createAuthHandoff(email?: string): Promise<string> {
+  await prisma.authHandoff.deleteMany({
+    where: {
+      expiresAt: { lte: new Date() },
+    },
+  });
+
   const handoff = await prisma.authHandoff.create({
     data: {
       email: email ? normalizeEmail(email) : null,

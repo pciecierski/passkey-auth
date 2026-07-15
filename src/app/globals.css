@@ -184,41 +184,8 @@ input:focus {
   font-weight: 600;
 }
 
-.mobile-auth-qr {
-  margin: 1rem 0;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  text-align: center;
-}
-
-.mobile-auth-qr__title {
-  margin: 0 0 0.35rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.mobile-auth-qr__code {
-  display: inline-flex;
-  margin: 0.75rem 0;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
-  background: #ffffff;
-}
-
-.mobile-auth-qr__link {
-  display: inline-block;
-  margin-top: 0.35rem;
-  color: var(--accent);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.mobile-auth-qr__link:hover {
-  text-decoration: underline;
+.desktop-qr-guide {
+  margin: 0.75rem 0 0.25rem;
 }
 
 .passkey-list {

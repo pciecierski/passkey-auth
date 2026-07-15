@@ -10,7 +10,17 @@ function hashToken(token: string): string {
   return createHash("sha256").update(`${token}:${getSessionSecret()}`).digest("hex");
 }
 
+export async function cleanupExpiredSessions(): Promise<void> {
+  await prisma.session.deleteMany({
+    where: {
+      expiresAt: { lte: new Date() },
+    },
+  });
+}
+
 export async function createSession(userId: string): Promise<string> {
+  await cleanupExpiredSessions();
+
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + SESSION_DAYS);
@@ -36,6 +46,8 @@ export async function createSession(userId: string): Promise<string> {
 }
 
 export async function getCurrentUser() {
+  await cleanupExpiredSessions();
+
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -65,6 +77,8 @@ export async function getCurrentUser() {
 }
 
 export async function destroySession(): Promise<void> {
+  await cleanupExpiredSessions();
+
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
