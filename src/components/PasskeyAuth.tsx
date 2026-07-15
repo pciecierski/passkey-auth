@@ -14,7 +14,10 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
 import { AppLogo } from "@/components/AppLogo";
+import { MobileAuthQr } from "@/components/MobileAuthQr";
+import { MobileDeviceIcon } from "@/components/MobileDeviceIcon";
 import { isDesktopBrowser, isIPadBrowser } from "@/lib/device";
+import { buildMobileAuthUrl } from "@/lib/mobile-auth-url";
 import {
   startHybridAuthentication,
   startHybridRegistration,
@@ -73,8 +76,11 @@ export function PasskeyAuth() {
   const [platformAvailable, setPlatformAvailable] = useState<boolean | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [isIPad, setIsIPad] = useState(false);
+  const [handoffId, setHandoffId] = useState<string | null>(null);
   const [waitingForOtherDevice, setWaitingForOtherDevice] = useState(false);
+  const [fromQrHandoff, setFromQrHandoff] = useState(false);
   const desktopLoginStartedRef = useRef(false);
+  const phoneQrLoginStartedRef = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -97,7 +103,6 @@ export function PasskeyAuth() {
       return;
     }
 
-    // Legacy deep links (?mobile=1) still work on phones; desktop no longer generates page URLs.
     const params = new URLSearchParams(window.location.search);
     if (params.get("mobile") !== "1") {
       return;
@@ -106,6 +111,16 @@ export function PasskeyAuth() {
     const tab = params.get("tab");
     const emailParam = params.get("email")?.trim().toLowerCase();
     const step = params.get("step");
+    const handoffParam = params.get("handoff");
+    const fromQr = params.get("from") === "qr";
+
+    if (handoffParam) {
+      setHandoffId(handoffParam);
+    }
+
+    if (fromQr) {
+      setFromQrHandoff(true);
+    }
 
     if (emailParam) {
       setEmail(emailParam);
@@ -138,22 +153,109 @@ export function PasskeyAuth() {
 
     desktopLoginStartedRef.current = true;
     const timer = window.setTimeout(() => {
+      void handleLogin({ useHybrid: true });
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktop, mode, loginStep, accountStatus?.hasPasskey, user]);
+
+  // iPhone/phone opened from iPad QR: start local Passkey and complete handoff for the iPad.
+  useEffect(() => {
+    if (
+      isDesktop ||
+      isIPad ||
+      !fromQrHandoff ||
+      mode !== "login" ||
+      loginStep !== "action" ||
+      !accountStatus?.hasPasskey ||
+      !handoffId ||
+      user ||
+      phoneQrLoginStartedRef.current
+    ) {
+      return;
+    }
+
+    phoneQrLoginStartedRef.current = true;
+    const timer = window.setTimeout(() => {
       void handleLogin();
     }, 50);
 
     return () => {
       window.clearTimeout(timer);
     };
-    // Auto-start once when desktop reaches the passkey-ready step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDesktop, mode, loginStep, accountStatus?.hasPasskey, user]);
+  }, [
+    isDesktop,
+    isIPad,
+    fromQrHandoff,
+    mode,
+    loginStep,
+    accountStatus?.hasPasskey,
+    handoffId,
+    user,
+  ]);
+
+  // iPad waits for the phone to finish Passkey, then claims the handoff session.
+  useEffect(() => {
+    if (!isIPad || !handoffId || !waitingForOtherDevice || user) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/auth/handoff/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ handoffId }),
+          });
+
+          if (response.status === 202) {
+            return;
+          }
+
+          if (!response.ok) {
+            if (response.status === 410) {
+              setWaitingForOtherDevice(false);
+              setHandoffId(null);
+              setMessage("Sesja QR wygasła. Wygeneruj kod ponownie.");
+            }
+            return;
+          }
+
+          const data = (await response.json()) as {
+            status: string;
+            user: User;
+          };
+
+          if (data.status === "complete" && data.user) {
+            setUser(data.user);
+            resetLoginFlow();
+            setMessage("Zalogowano na iPadzie po autoryzacji na iPhonie.");
+          }
+        } catch {
+          // Keep polling until success or expiry.
+        }
+      })();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isIPad, handoffId, waitingForOtherDevice, user]);
 
   function resetLoginFlow() {
     setLoginStep("email");
     setAccountStatus(null);
     setMessage(null);
+    setHandoffId(null);
     setWaitingForOtherDevice(false);
+    setFromQrHandoff(false);
     desktopLoginStartedRef.current = false;
+    phoneQrLoginStartedRef.current = false;
   }
 
   function switchMode(nextMode: Mode) {
@@ -219,6 +321,7 @@ export function PasskeyAuth() {
       setLoginStep("action");
       setMode("login");
       desktopLoginStartedRef.current = false;
+      phoneQrLoginStartedRef.current = false;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nie udało się sprawdzić konta");
     } finally {
@@ -228,6 +331,32 @@ export function PasskeyAuth() {
 
   async function handleCheckAccount() {
     await loadExistingAccount(email);
+  }
+
+  async function startOtherMobileDeviceLogin() {
+    setMessage(null);
+    setWaitingForOtherDevice(true);
+
+    try {
+      const response = await fetch("/api/auth/handoff/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+
+      const data = (await response.json()) as { handoffId: string };
+      setHandoffId(data.handoffId);
+    } catch (error) {
+      setWaitingForOtherDevice(false);
+      setHandoffId(null);
+      setMessage(
+        error instanceof Error ? error.message : "Nie udało się wygenerować kodu QR",
+      );
+    }
   }
 
   async function handleRegister(allowExistingAccount = false) {
@@ -287,7 +416,10 @@ export function PasskeyAuth() {
       const verifyResponse = await fetch("/api/auth/register/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(attestation),
+        body: JSON.stringify({
+          ...attestation,
+          handoffId: handoffId ?? undefined,
+        }),
       });
 
       if (!verifyResponse.ok) {
@@ -298,14 +430,15 @@ export function PasskeyAuth() {
       const sessionResponse = await fetch("/api/auth/session");
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
-      setMessage(
-        allowExistingAccount
+      const successMessage = fromQrHandoff
+        ? "Passkey potwierdzony. Możesz wrócić do iPada — sesja powinna się zsynchronizować."
+        : allowExistingAccount
           ? "Passkey utworzony. Zalogowano."
           : isDesktop
             ? "Konto i Passkey utworzone na telefonie. Zalogowano na desktopie."
-            : "Konto i Passkey utworzone.",
-      );
+            : "Konto i Passkey utworzone.";
       resetLoginFlow();
+      setMessage(successMessage);
     } catch (error) {
       if (isWebAuthnCancelError(error)) {
         setMessage(
@@ -322,10 +455,14 @@ export function PasskeyAuth() {
   }
 
   async function handleLogin(options?: { useHybrid?: boolean }) {
+    // Hybrid FIDO QR works on desktop browsers. iPad/WebKit cannot show it reliably —
+    // that path uses startOtherMobileDeviceLogin() + URL QR instead.
     const useHybrid = options?.useHybrid === true || isDesktop;
     setLoading(true);
     setMessage(null);
-    setWaitingForOtherDevice(useHybrid);
+    if (useHybrid) {
+      setWaitingForOtherDevice(true);
+    }
 
     try {
       const optionsResponse = await fetch("/api/auth/login/options", {
@@ -349,7 +486,10 @@ export function PasskeyAuth() {
       const verifyResponse = await fetch("/api/auth/login/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(assertion),
+        body: JSON.stringify({
+          ...assertion,
+          handoffId: handoffId ?? undefined,
+        }),
       });
 
       if (!verifyResponse.ok) {
@@ -361,26 +501,33 @@ export function PasskeyAuth() {
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
       setMessage(
-        useHybrid
-          ? isDesktop
+        fromQrHandoff
+          ? "Passkey potwierdzony. Możesz wrócić do iPada — logowanie dokończy się automatycznie."
+          : useHybrid
             ? "Zalogowano na desktopie po Passkey z telefonu."
-            : "Zalogowano po Passkey z innego urządzenia mobilnego."
-          : "Zalogowano przez Passkey.",
+            : "Zalogowano przez Passkey.",
       );
       resetLoginFlow();
     } catch (error) {
       if (isWebAuthnCancelError(error)) {
         setMessage(
           useHybrid
-            ? "Anulowano. Zeskanuj kod QR z okna przeglądarki innym telefonem albo spróbuj ponownie."
-            : "Anulowano logowanie Passkey.",
+            ? "Anulowano. Zeskanuj kod QR z okna przeglądarki telefonem albo spróbuj ponownie."
+            : fromQrHandoff
+              ? "Anulowano. Potwierdź Passkey na tym telefonie, aby dokończyć logowanie na iPadzie."
+              : "Anulowano logowanie Passkey.",
         );
+        if (fromQrHandoff) {
+          phoneQrLoginStartedRef.current = false;
+        }
       } else {
         setMessage(error instanceof Error ? error.message : "Logowanie nie powiodło się");
       }
     } finally {
       setLoading(false);
-      setWaitingForOtherDevice(false);
+      if (useHybrid) {
+        setWaitingForOtherDevice(false);
+      }
     }
   }
 
@@ -406,6 +553,15 @@ export function PasskeyAuth() {
   const registerPasswordIsValid = registerAccountExists
     ? password.length > 0
     : password.length >= 8 && password === confirmPassword && confirmPassword.length > 0;
+  const otherDeviceAuthUrl =
+    isIPad && waitingForOtherDevice && handoffId && emailIsValid
+      ? buildMobileAuthUrl({
+          mode: "login",
+          email,
+          step: "action",
+          handoffId,
+        })
+      : null;
 
   if (webAuthnSupported === false) {
     return (
@@ -456,14 +612,23 @@ export function PasskeyAuth() {
     <div className="card">
       <AppLogo />
       <p className="badge">
-        {isDesktop ? "Autoryzacja przez telefon" : "Mobilna autoryzacja Passkey"}
+        {isDesktop
+          ? "Autoryzacja przez telefon"
+          : fromQrHandoff
+            ? "Dokończ logowanie na iPadzie"
+            : "Mobilna autoryzacja Passkey"}
       </p>
       <h1>{mode === "login" ? "Logowanie" : "Rejestracja"}</h1>
       <p className="muted">
         {isDesktop
           ? "Na desktopie logowanie odbywa się przez kod QR przeglądarki. Passkey działa wyłącznie na telefonie."
-          : "Użyj Face ID, Touch ID, odcisku palca lub kodu PIN urządzenia."}
-        {!isDesktop && platformAvailable === false && " Brak autentykatora platformowego na tym urządzeniu."}
+          : fromQrHandoff
+            ? "Potwierdź Passkey na tym telefonie. iPad zaloguje się automatycznie."
+            : "Użyj Face ID, Touch ID, odcisku palca lub kodu PIN urządzenia."}
+        {!isDesktop &&
+          !fromQrHandoff &&
+          platformAvailable === false &&
+          " Brak autentykatora platformowego na tym urządzeniu."}
       </p>
 
       <div className="tabs">
@@ -499,7 +664,7 @@ export function PasskeyAuth() {
                 }
               }}
               required
-              disabled={loading}
+              disabled={loading || waitingForOtherDevice}
             />
           </label>
 
@@ -527,20 +692,20 @@ export function PasskeyAuth() {
                 {accountStatus.hasPasskey
                   ? isDesktop
                     ? " Zaloguj się skanując kod QR telefonem."
-                    : " Możesz zalogować się przez Passkey."
+                    : fromQrHandoff
+                      ? " Potwierdź Passkey, aby dokończyć logowanie na iPadzie."
+                      : " Możesz zalogować się przez Passkey."
                   : " To konto nie ma jeszcze Passkey."}
               </p>
 
-              {(isDesktop || waitingForOtherDevice) && accountStatus.hasPasskey && (
+              {isDesktop && accountStatus.hasPasskey && (
                 <div className="desktop-qr-guide">
                   <p className="hint">
-                    Przeglądarka pokazuje natywny kod QR. Zeskanuj go aparatem iPhone’a — system
+                    Przeglądarka pokazuje natywny kod QR. Zeskanuj go aparatem telefonu — system
                     zaproponuje Passkey do tej witryny, bez otwierania strony w przeglądarce na
                     telefonie. Urządzenia powinny być blisko siebie (Bluetooth).
                   </p>
-                  {loading && (
-                    <p className="hint">Oczekiwanie na Passkey z innego urządzenia mobilnego…</p>
-                  )}
+                  {loading && <p className="hint">Oczekiwanie na Passkey z telefonu…</p>}
                 </div>
               )}
 
@@ -556,6 +721,18 @@ export function PasskeyAuth() {
                   Możesz użyć Passkey na tym iPadzie albo wygenerować kod QR i zalogować się
                   Passkeyem z iPhone’a.
                 </p>
+              )}
+
+              {otherDeviceAuthUrl && (
+                <MobileAuthQr
+                  url={otherDeviceAuthUrl}
+                  title="Zeskanuj iPhone’em"
+                  description="Zeskanuj kod aparatem iPhone’a, potwierdź Passkey na telefonie — ten iPad zaloguje się automatycznie."
+                />
+              )}
+
+              {waitingForOtherDevice && isIPad && (
+                <p className="hint">Oczekiwanie na logowanie z iPhone’a…</p>
               )}
 
               {message && <p className={message.startsWith("Anulowano") ? "hint" : "error"}>{message}</p>}
@@ -585,26 +762,35 @@ export function PasskeyAuth() {
                 )
               ) : accountStatus.hasPasskey ? (
                 <>
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => void handleLogin()}
-                    disabled={loading}
-                  >
-                    {loading && !waitingForOtherDevice
-                      ? "Oczekiwanie na urządzenie..."
-                      : "Zaloguj przez Passkey"}
-                  </button>
-                  {isIPad && (
+                  {!waitingForOtherDevice && (
                     <button
-                      className="button secondary"
+                      className="button"
                       type="button"
-                      onClick={() => void handleLogin({ useHybrid: true })}
+                      onClick={() => void handleLogin()}
                       disabled={loading}
                     >
-                      {loading && waitingForOtherDevice
-                        ? "Oczekiwanie na iPhone’a…"
-                        : "Zaloguj się na innym urządzeniu mobilnym"}
+                      {loading
+                        ? fromQrHandoff
+                          ? "Potwierdź Passkey…"
+                          : "Oczekiwanie na urządzenie..."
+                        : fromQrHandoff
+                          ? "Potwierdź Passkey"
+                          : "Zaloguj przez Passkey"}
+                    </button>
+                  )}
+                  {isIPad && (
+                    <button
+                      className="button cross-device"
+                      type="button"
+                      onClick={() => void startOtherMobileDeviceLogin()}
+                      disabled={loading}
+                    >
+                      <MobileDeviceIcon />
+                      <span>
+                        {waitingForOtherDevice
+                          ? "Wygeneruj nowy kod QR"
+                          : "Zaloguj się na innym urządzeniu mobilnym"}
+                      </span>
                     </button>
                   )}
                 </>

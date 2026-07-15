@@ -160,6 +160,46 @@ input:focus {
   border: 1px solid var(--border);
 }
 
+.button.cross-device {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  width: 100%;
+  background: linear-gradient(135deg, #0ea5e9, #0369a1);
+  color: #f0f9ff;
+  border: 0;
+  box-shadow: 0 10px 24px rgba(3, 105, 161, 0.35);
+}
+
+.button.cross-device:disabled {
+  opacity: 0.75;
+}
+
+.mobile-auth-qr {
+  margin: 0.25rem 0 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+}
+
+.mobile-auth-qr__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mobile-auth-qr__code {
+  display: inline-flex;
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
 .hint,
 .message,
 .error {

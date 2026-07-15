@@ -181,13 +181,16 @@ export async function beginAuthentication(
   }
 
   const allowCredentials = user.passkeys.map((passkey) => {
-    const transports = parseTransports(passkey.transports) ?? [];
-    if (settings?.preferHybrid && !transports.includes("hybrid")) {
-      transports.push("hybrid");
+    if (settings?.preferHybrid) {
+      return {
+        id: passkey.credentialId,
+        transports: ["hybrid"] as AuthenticatorTransportFuture[],
+      };
     }
+
     return {
       id: passkey.credentialId,
-      transports: transports.length > 0 ? transports : undefined,
+      transports: parseTransports(passkey.transports),
     };
   });
 

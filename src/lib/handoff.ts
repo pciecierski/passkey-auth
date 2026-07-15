@@ -62,6 +62,10 @@ export async function claimAuthHandoff(handoffId: string) {
     return { status: "pending" as const };
   }
 
+  if (handoff.claimedAt) {
+    return { status: "expired" as const };
+  }
+
   await prisma.authHandoff.update({
     where: { id: handoffId },
     data: { claimedAt: new Date() },
