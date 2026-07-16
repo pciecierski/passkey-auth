@@ -1,5 +1,7 @@
 # Passkey Auth
 
+[![CI](https://github.com/pciecierski/passkey-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/pciecierski/passkey-auth/actions/workflows/ci.yml)
+
 Mobilna autoryzacja za pomocą **Passkey** (WebAuthn / FIDO2) zbudowana na Next.js.
 
 ## Funkcje
@@ -20,6 +22,8 @@ Mobilna autoryzacja za pomocą **Passkey** (WebAuthn / FIDO2) zbudowana na Next.
 npm install
 npm.cmd run dev
 ```
+
+Testy jednostkowe: `npm test`
 
 Pierwsze uruchomienie utworzy lokalną bazę SQLite (`prisma/dev.db`) automatycznie.
 
