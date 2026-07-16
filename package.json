@@ -11,6 +11,8 @@
     "build": "npm run prepare:prisma && prisma generate && next build",
     "start": "npm run prepare:prisma && node scripts/ensure-database-url.mjs && prisma migrate deploy && next start",
     "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:migrate": "npm run prepare:prisma && prisma migrate deploy",
     "db:migrate:dev": "npm run prepare:prisma && prisma migrate dev",
     "db:push": "npm run prepare:prisma && prisma db push",
@@ -33,6 +35,7 @@
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "eslint": "^9.22.0",
-    "eslint-config-next": "^15.2.4"
+    "eslint-config-next": "^15.2.4",
+    "vitest": "^4.1.10"
   }
 }
