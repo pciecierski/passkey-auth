@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getPublicAppOrigin,
   getSessionSecret,
   getWebAuthnConfig,
   normalizeOrigin,
@@ -53,6 +54,14 @@ describe("getWebAuthnConfig", () => {
       rpID: "example.com",
       origin: "https://example.com",
     });
+  });
+});
+
+describe("getPublicAppOrigin", () => {
+  it("prefers NEXT_PUBLIC_APP_URL over ORIGIN", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.example.com/";
+    process.env.ORIGIN = "https://origin.example.com";
+    expect(getPublicAppOrigin()).toBe("https://app.example.com");
   });
 });
 

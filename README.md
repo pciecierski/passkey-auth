@@ -8,6 +8,7 @@ Mobilna autoryzacja za pomocą **Passkey** (WebAuthn / FIDO2) zbudowana na Next.
 
 - Hasła + Passkey z weryfikacją konta przed logowaniem
 - Odzyskiwanie dostępu: hasło konta pozwala utworzyć nowy Passkey w zakładce rejestracji
+- Reset hasła e-mailem (magic link) — Resend lub link w logach serwera w lokalnym dev
 - Mobile-first UI + manifest PWA (możliwość dodania do ekranu głównego)
 - **PostgreSQL** + Prisma — dane przetrwają deploy na Railway
 - Sesje oparte o bezpieczne ciasteczka HTTP-only
@@ -44,7 +45,9 @@ Opcjonalnie: `npm run db:up` + PostgreSQL w Dockerze, jeśli wolisz Postgres lok
 | `SESSION_SECRET` | losowy sekret (np. `openssl rand -hex 32`) |
 | `RP_ID` | **tylko domena**, np. `passkey-auth.dcsandbox.dev` (bez `https://`) |
 | `ORIGIN` | pełny URL, np. `https://passkey-auth.dcsandbox.dev` |
-| `NEXT_PUBLIC_APP_URL` | ten sam URL co `ORIGIN` (dla kodów QR) |
+| `NEXT_PUBLIC_APP_URL` | ten sam URL co `ORIGIN` (dla kodów QR i linków resetu) |
+| `RESEND_API_KEY` | (opcjonalnie) klucz [Resend](https://resend.com) do maili resetu hasła |
+| `EMAIL_FROM` | (opcjonalnie) nadawca, np. `Passkey Auth <noreply@twoja-domena>` |
 
 4. **Redeploy** serwisu aplikacji po dodaniu zmiennych.
 
@@ -76,6 +79,8 @@ ORIGIN=https://twoja-domena.example
 | `POST /api/auth/register/verify` | Weryfikuje nowy Passkey i tworzy sesję |
 | `POST /api/auth/login/options` | Generuje opcje logowania |
 | `POST /api/auth/login/verify` | Weryfikuje Passkey i tworzy sesję |
+| `POST /api/auth/password/forgot` | Wysyła link resetu hasła (zawsze ta sama odpowiedź) |
+| `POST /api/auth/password/reset` | Ustawia nowe hasło na podstawie tokenu z maila |
 | `GET /api/auth/session` | Zwraca zalogowanego użytkownika |
 | `DELETE /api/auth/session` | Wylogowanie |
 

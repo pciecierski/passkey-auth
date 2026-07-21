@@ -31,6 +31,13 @@ export function getWebAuthnConfig() {
   return { rpName, rpID, origin };
 }
 
+/** Public app origin for emails and absolute links (server-side). */
+export function getPublicAppOrigin(): string {
+  return normalizeOrigin(
+    process.env.NEXT_PUBLIC_APP_URL ?? process.env.ORIGIN ?? "http://localhost:3000",
+  );
+}
+
 export function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret) {
