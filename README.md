@@ -7,6 +7,7 @@ Mobilna autoryzacja za pomocą **Passkey** (WebAuthn / FIDO2) zbudowana na Next.
 ## Funkcje
 
 - Hasła + Passkey z weryfikacją konta przed logowaniem
+- Odzyskiwanie dostępu: hasło konta pozwala utworzyć nowy Passkey w zakładce rejestracji
 - Mobile-first UI + manifest PWA (możliwość dodania do ekranu głównego)
 - **PostgreSQL** + Prisma — dane przetrwają deploy na Railway
 - Sesje oparte o bezpieczne ciasteczka HTTP-only

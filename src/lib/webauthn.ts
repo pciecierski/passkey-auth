@@ -42,13 +42,16 @@ export async function beginRegistration(
   let passwordHash: string | undefined;
 
   if (existingUser) {
-    if (existingUser.passkeys.length > 0) {
-      throw new Error("Konto już istnieje. Zaloguj się.");
-    }
-
     if (settings?.allowExistingAccount) {
-      // Logowanie: dodanie Passkey bez hasła (flow z zakładki logowania).
+      // Login tab: add a first Passkey without password only when none exist yet.
+      if (existingUser.passkeys.length > 0) {
+        throw new Error(
+          "Konto już ma Passkey. Zaloguj się albo odzyskaj dostęp hasłem w zakładce Rejestracja lub odzyskiwanie.",
+        );
+      }
     } else {
+      // Register / recover: existing accounts must prove ownership with the password
+      // (covers first Passkey enrollment and recovery when a Passkey was lost).
       if (!settings?.password) {
         throw new Error("Podaj aktualne hasło do tego konta.");
       }

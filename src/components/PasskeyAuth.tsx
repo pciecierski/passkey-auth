@@ -313,7 +313,7 @@ export function PasskeyAuth() {
 
       const status = (await response.json()) as AccountStatus;
       if (!status.exists) {
-        throw new Error("Konto nie istnieje. Zarejestruj się, aby utworzyć konto.");
+        throw new Error("Konto nie istnieje. Użyj zakładki Rejestracja lub odzyskiwanie.");
       }
 
       setEmail(targetEmail.trim().toLowerCase());
@@ -366,9 +366,6 @@ export function PasskeyAuth() {
     try {
       if (!allowExistingAccount) {
         if (registerAccountStatus?.exists) {
-          if (registerAccountStatus.hasPasskey) {
-            throw new Error("Konto już istnieje i ma Passkey. Zaloguj się.");
-          }
           if (!password) {
             throw new Error("Podaj aktualne hasło do tego konta.");
           }
@@ -430,13 +427,19 @@ export function PasskeyAuth() {
       const sessionResponse = await fetch("/api/auth/session");
       const sessionData = (await sessionResponse.json()) as { user: User | null };
       setUser(sessionData.user);
+      const isRecovery =
+        !allowExistingAccount && Boolean(registerAccountStatus?.exists && registerAccountStatus.hasPasskey);
       const successMessage = fromQrHandoff
         ? "Passkey potwierdzony. Możesz wrócić do iPada — sesja powinna się zsynchronizować."
         : allowExistingAccount
           ? "Passkey utworzony. Zalogowano."
-          : isDesktop
-            ? "Konto i Passkey utworzone na telefonie. Zalogowano na desktopie."
-            : "Konto i Passkey utworzone.";
+          : isRecovery
+            ? isDesktop
+              ? "Nowy Passkey utworzony na telefonie. Zalogowano."
+              : "Nowy Passkey utworzony. Zalogowano."
+            : isDesktop
+              ? "Konto i Passkey utworzone na telefonie. Zalogowano na desktopie."
+              : "Konto i Passkey utworzone.";
       resetLoginFlow();
       setMessage(successMessage);
     } catch (error) {
@@ -447,7 +450,9 @@ export function PasskeyAuth() {
             : "Anulowano tworzenie Passkey.",
         );
       } else {
-        setMessage(error instanceof Error ? error.message : "Rejestracja nie powiodła się");
+        setMessage(
+          error instanceof Error ? error.message : "Rejestracja lub odzyskiwanie nie powiodły się",
+        );
       }
     } finally {
       setLoading(false);
@@ -545,6 +550,7 @@ export function PasskeyAuth() {
 
   const emailIsValid = email.trim().length > 0;
   const registerAccountExists = registerAccountStatus?.exists ?? false;
+  const isRecoveryAccount = Boolean(registerAccountExists && registerAccountStatus?.hasPasskey);
   const passwordsMismatch =
     !registerAccountExists && confirmPassword.length > 0 && password !== confirmPassword;
   const passwordTooShort =
@@ -617,7 +623,7 @@ export function PasskeyAuth() {
             ? "Dokończ logowanie na iPadzie"
             : "Mobilna autoryzacja Passkey"}
       </p>
-      <h1>{mode === "login" ? "Logowanie" : "Rejestracja"}</h1>
+      <h1>{mode === "login" ? "Logowanie" : "Rejestracja lub odzyskiwanie"}</h1>
       <p className="muted">
         {isDesktop
           ? "Na desktopie logowanie odbywa się przez kod QR przeglądarki. Passkey działa wyłącznie na telefonie."
@@ -643,7 +649,7 @@ export function PasskeyAuth() {
           onClick={() => switchMode("register")}
           type="button"
         >
-          Rejestracja
+          Rejestracja lub odzyskiwanie
         </button>
       </div>
 
@@ -697,6 +703,12 @@ export function PasskeyAuth() {
                   : " To konto nie ma jeszcze Passkey."}
               </p>
 
+              {accountStatus.hasPasskey && !fromQrHandoff && (
+                <p className="hint">
+                  Utracony Passkey? Odzyskaj dostęp hasłem w zakładce Rejestracja lub odzyskiwanie.
+                </p>
+              )}
+
               {isDesktop && accountStatus.hasPasskey && (
                 <div className="desktop-qr-guide">
                   <p className="hint">
@@ -710,8 +722,8 @@ export function PasskeyAuth() {
 
               {isDesktop && !accountStatus.hasPasskey && (
                 <p className="warning">
-                  Utwórz Passkey w zakładce Rejestracja — przeglądarka pokaże kod QR, a klucz
-                  powstanie na telefonie.
+                  Utwórz Passkey w zakładce Rejestracja lub odzyskiwanie — przeglądarka pokaże
+                  kod QR, a klucz powstanie na telefonie.
                 </p>
               )}
 
@@ -756,7 +768,7 @@ export function PasskeyAuth() {
                     onClick={() => switchMode("register")}
                     disabled={loading}
                   >
-                    Przejdź do rejestracji Passkey
+                    Przejdź do rejestracji lub odzyskiwania
                   </button>
                 )
               ) : accountStatus.hasPasskey ? (
@@ -823,17 +835,19 @@ export function PasskeyAuth() {
             void handleRegister(false);
           }}
         >
-          <label>
-            Imię
-            <input
-              type="text"
-              autoComplete="name"
-              placeholder="Twoje imię"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={loading}
-            />
-          </label>
+          {!registerAccountExists && (
+            <label>
+              Imię
+              <input
+                type="text"
+                autoComplete="name"
+                placeholder="Twoje imię"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={loading}
+              />
+            </label>
+          )}
 
           <label>
             Email
@@ -885,8 +899,10 @@ export function PasskeyAuth() {
           {passwordsMismatch && <p className="error">Hasła nie są identyczne.</p>}
 
           <p className="hint">
-            {registerAccountStatus?.exists && registerAccountStatus.hasPasskey
-              ? "To konto już ma Passkey. Przejdź do logowania."
+            {isRecoveryAccount
+              ? isDesktop
+                ? "Utracony Passkey? Podaj hasło, a potem zeskanuj kod QR telefonem, aby utworzyć nowy klucz."
+                : "Utracony Passkey? Podaj hasło konta, aby utworzyć nowy Passkey i odzyskać dostęp."
               : isDesktop
                 ? registerAccountExists
                   ? "Podaj aktualne hasło. Potem zeskanuj kod QR telefonem, aby utworzyć Passkey na telefonie."
@@ -901,20 +917,19 @@ export function PasskeyAuth() {
           <button
             className="button"
             type="submit"
-            disabled={
-              loading ||
-              !emailIsValid ||
-              !registerPasswordIsValid ||
-              (registerAccountStatus?.exists === true && registerAccountStatus.hasPasskey)
-            }
+            disabled={loading || !emailIsValid || !registerPasswordIsValid}
           >
             {loading
               ? isDesktop
                 ? "Zeskanuj kod QR telefonem…"
                 : "Oczekiwanie na urządzenie..."
-              : isDesktop
-                ? "Utwórz Passkey na telefonie"
-                : "Zarejestruj konto z Passkey"}
+              : isRecoveryAccount
+                ? isDesktop
+                  ? "Odzyskaj Passkey na telefonie"
+                  : "Odzyskaj dostęp — nowy Passkey"
+                : isDesktop
+                  ? "Utwórz Passkey na telefonie"
+                  : "Zarejestruj konto z Passkey"}
           </button>
         </form>
       )}
