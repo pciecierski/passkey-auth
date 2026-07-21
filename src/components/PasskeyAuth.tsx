@@ -69,6 +69,8 @@ export function PasskeyAuth() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [registerAccountStatus, setRegisterAccountStatus] = useState<AccountStatus | null>(null);
+  const [passwordResetSent, setPasswordResetSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -113,6 +115,7 @@ export function PasskeyAuth() {
     const step = params.get("step");
     const handoffParam = params.get("handoff");
     const fromQr = params.get("from") === "qr";
+    const passwordWasReset = params.get("reset") === "1";
 
     if (handoffParam) {
       setHandoffId(handoffParam);
@@ -128,6 +131,19 @@ export function PasskeyAuth() {
 
     if (tab === "login" || tab === "register") {
       setMode(tab);
+    }
+
+    if (passwordWasReset) {
+      setMessage("Hasło zmienione. Podaj nowe hasło i utwórz Passkey, aby odzyskać dostęp.");
+      const clean = new URLSearchParams();
+      if (tab) {
+        clean.set("tab", tab);
+      }
+      if (emailParam) {
+        clean.set("email", emailParam);
+      }
+      const query = clean.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
     }
 
     if (tab === "login" && step === "action" && emailParam) {
@@ -264,6 +280,7 @@ export function PasskeyAuth() {
     setPassword("");
     setConfirmPassword("");
     setRegisterAccountStatus(null);
+    setPasswordResetSent(false);
   }
 
   async function checkRegisterEmailFor(targetEmail = email) {
@@ -294,6 +311,32 @@ export function PasskeyAuth() {
 
   async function checkRegisterEmail() {
     await checkRegisterEmailFor(email);
+  }
+
+  async function handleForgotPassword() {
+    setForgotLoading(true);
+    setMessage(null);
+    setPasswordResetSent(false);
+
+    try {
+      const response = await fetch("/api/auth/password/forgot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+
+      const data = (await response.json()) as { message?: string };
+      setPasswordResetSent(true);
+      setMessage(data.message ?? "Jeśli konto istnieje, wysłaliśmy link do resetu hasła.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nie udało się wysłać linku resetu");
+    } finally {
+      setForgotLoading(false);
+    }
   }
 
   async function loadExistingAccount(targetEmail = email) {
@@ -859,6 +902,7 @@ export function PasskeyAuth() {
               onChange={(event) => {
                 setEmail(event.target.value);
                 setRegisterAccountStatus(null);
+                setPasswordResetSent(false);
               }}
               onBlur={() => void checkRegisterEmail()}
               required
@@ -878,6 +922,17 @@ export function PasskeyAuth() {
               disabled={loading}
             />
           </label>
+
+          {registerAccountExists && (
+            <button
+              className="text-link"
+              type="button"
+              onClick={() => void handleForgotPassword()}
+              disabled={loading || forgotLoading || !emailIsValid}
+            >
+              {forgotLoading ? "Wysyłanie…" : "Nie pamiętam hasła"}
+            </button>
+          )}
 
           {!registerAccountExists && (
             <label>
@@ -912,7 +967,18 @@ export function PasskeyAuth() {
                   : "Utworzysz nowe konto z hasłem i przypiszesz do niego Passkey."}
           </p>
 
-          {message && <p className="error">{message}</p>}
+          {passwordResetSent && (
+            <p className="message">
+              Sprawdź skrzynkę e-mail i otwórz link resetu. Po zmianie hasła wrócisz tutaj, żeby
+              utworzyć nowy Passkey.
+            </p>
+          )}
+
+          {message && (
+            <p className={message.startsWith("Hasło zmienione") || passwordResetSent ? "message" : "error"}>
+              {message}
+            </p>
+          )}
 
           <button
             className="button"
